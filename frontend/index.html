@@ -1,0 +1,200 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>TaskGraph</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; }
+  section { margin-bottom: 28px; padding: 16px; border: 1px solid #ddd; border-radius: 8px; }
+  button { background: #111; color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; }
+  button:disabled { background: #999; cursor: default; }
+  .task { padding: 6px 0; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; }
+  .status { font-family: monospace; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; }
+  .succeeded { background: #d4f4dd; }
+  .failed, .superseded { background: #f8d4d4; }
+  .running, .claimed, .eligible { background: #fdf1c7; }
+  .pending { background: #eee; }
+  textarea, input[type=text] { width: 100%; box-sizing: border-box; padding: 8px; margin-top: 6px; }
+  pre { white-space: pre-wrap; background: #f7f7f7; padding: 12px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<h1>TaskGraph — Deterministic Multi-Agent Orchestrator</h1>
+<p style="color:#888; font-size:0.85em; margin-top:-8px;">⏳ Runs on a free-tier host — if it's been idle a while, the first request can take up to ~30s to wake up. Thanks for your patience!</p>
+
+<div id="loadingIndicator" style="display:none; padding:10px 16px; margin-bottom:16px; background:#fff8e1; border:1px solid #f0d98c; border-radius:6px; color:#7a5c00;"></div>
+
+<section id="examples-section">
+  <h3>Try an example</h3>
+  <p style="color:#555; margin-top:-4px;">No dataset handy? Pick one — it'll load the file, fill in the question, and submit for you.</p>
+  <div id="exampleButtons"></div>
+</section>
+
+<section id="submit-section">
+  <h3>1. Upload a dataset and ask a question</h3>
+  <input type="file" id="file" accept=".csv">
+  <input type="text" id="question" placeholder="e.g. What was the month with the highest total?">
+  <br><br>
+  <button id="submitBtn">Propose plan</button>
+</section>
+
+<section id="plan-section" style="display:none">
+  <h3>2. Review the proposed plan</h3>
+  <p><i id="reviewerFeedback"></i></p>
+  <pre id="planJson"></pre>
+  <button id="approveBtn">Approve &amp; run</button>
+</section>
+
+<section id="status-section" style="display:none">
+  <h3>3. Live status</h3>
+  <div id="taskList"></div>
+</section>
+
+<section id="report-section" style="display:none">
+  <h3>4. Report</h3>
+  <pre id="reportText"></pre>
+  <div id="faithfulness"></div>
+</section>
+
+<script>
+let runId = null;
+
+const EXAMPLES = [
+  {
+    label: "Sales by month",
+    csv: "/samples/sample_sales_data.csv",
+    filename: "sample_sales_data.csv",
+    question: "What is the total revenue across all months?",
+  },
+  {
+    label: "Product revenue by category",
+    csv: "/samples/product_performance.csv",
+    filename: "product_performance.csv",
+    question: "What is the total revenue (units_sold * unit_price) per category, and which category performed best?",
+  },
+  {
+    label: "Messy customer data",
+    csv: "/samples/messy_customer_data.csv",
+    filename: "messy_customer_data.csv",
+    question: "What is the average monthly spend, ignoring missing values?",
+  },
+];
+
+function setLoading(message) {
+  const el = document.getElementById("loadingIndicator");
+  const buttons = document.querySelectorAll("button");
+  if (message) {
+    el.textContent = "⏳ " + message;
+    el.style.display = "block";
+    buttons.forEach(b => b.disabled = true);
+  } else {
+    el.style.display = "none";
+    buttons.forEach(b => b.disabled = false);
+  }
+}
+
+function renderExampleButtons() {
+  const container = document.getElementById("exampleButtons");
+  container.innerHTML = "";
+  EXAMPLES.forEach((ex, i) => {
+    const btn = document.createElement("button");
+    btn.textContent = ex.label;
+    btn.style.marginRight = "8px";
+    btn.style.marginBottom = "8px";
+    btn.onclick = () => loadExample(i);
+    container.appendChild(btn);
+  });
+}
+renderExampleButtons();
+
+async function loadExample(i) {
+  const ex = EXAMPLES[i];
+  const resp = await fetch(ex.csv);
+  const blob = await resp.blob();
+  const file = new File([blob], ex.filename, { type: "text/csv" });
+
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  document.getElementById("file").files = dt.files;
+  document.getElementById("question").value = ex.question;
+
+  await submitRun(file, ex.question);
+}
+
+document.getElementById("submitBtn").onclick = async () => {
+  const file = document.getElementById("file").files[0];
+  const question = document.getElementById("question").value;
+  if (!file || !question) { alert("pick a file and enter a question"); return; }
+  await submitRun(file, question);
+};
+
+async function submitRun(file, question) {
+  setLoading("Submitting your question — if the server was asleep, this can take up to ~30s while it wakes up...");
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("question", question);
+
+    const resp = await fetch("/runs", { method: "POST", body: form });
+    const data = await resp.json();
+    runId = data.run_id;
+
+    document.getElementById("reviewerFeedback").textContent = data.reviewer_feedback || "";
+    document.getElementById("planJson").textContent = JSON.stringify(data.plan, null, 2);
+    document.getElementById("plan-section").style.display = "block";
+    document.getElementById("plan-section").scrollIntoView({ behavior: "smooth" });
+  } finally {
+    setLoading(null);
+  }
+}
+
+document.getElementById("approveBtn").onclick = async () => {
+  setLoading("Starting execution...");
+  try {
+    await fetch(`/runs/${runId}/approve`, { method: "POST" });
+    document.getElementById("status-section").style.display = "block";
+    streamStatus();
+  } finally {
+    setLoading(null);
+  }
+};
+
+function streamStatus() {
+  const es = new EventSource(`/runs/${runId}/stream`);
+  es.onmessage = (e) => {
+    const snap = JSON.parse(e.data);
+    const list = document.getElementById("taskList");
+    list.innerHTML = snap.tasks.map(t =>
+      `<div class="task"><span>${t.plan_task_id || t.id}</span><span class="status ${t.status}">${t.status}</span></div>`
+    ).join("");
+    if (snap.status === "completed" || snap.status === "failed") {
+      es.close();
+      fetchReport();
+    }
+  };
+}
+
+async function fetchReport() {
+  setLoading("Generating final report and checking it against the computed numbers...");
+  try {
+    const resp = await fetch(`/runs/${runId}/report`);
+    const data = await resp.json();
+    document.getElementById("report-section").style.display = "block";
+    document.getElementById("reportText").textContent = data.report || "(not ready)";
+    if (data.faithfulness) {
+      const f = data.faithfulness;
+      const el = document.getElementById("faithfulness");
+      if (f.unsupported_claims && f.unsupported_claims.length) {
+        el.innerHTML = `<b style="color:#a33">⚠ Unsupported numeric claims flagged:</b> ${f.unsupported_claims.join(", ")}`;
+      } else {
+        el.innerHTML = `<b style="color:#2a2">✓ All ${f.checked_claims} numeric claim(s) checked against computed artifacts.</b>`;
+      }
+    }
+  } finally {
+    setLoading(null);
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+product,category,units_sold,unit_price,month
+Widget A,Hardware,120,29.99,January
+Widget B,Hardware,85,49.99,January
+Cable Pro,Accessories,340,9.99,January
+Widget A,Hardware,142,29.99,February
+Widget B,Hardware,91,49.99,February
+Cable Pro,Accessories,298,9.99,February
+Case Basic,Accessories,410,14.99,February
+Widget A,Hardware,167,29.99,March
+Widget B,Hardware,103,49.99,March
+Cable Pro,Accessories,355,9.99,March
+Case Basic,Accessories,387,14.99,March
+Dock Station,Hardware,44,79.99,March

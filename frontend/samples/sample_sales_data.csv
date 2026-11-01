@@ -1,0 +1,13 @@
+month,revenue,units_sold,region
+January,45230,412,North
+February,51890,467,North
+March,48120,431,South
+April,62340,558,South
+May,58900,521,East
+June,71230,634,East
+July,69850,601,West
+August,74560,652,West
+September,68210,589,North
+October,72890,615,South
+November,81340,701,East
+December,95670,823,West
